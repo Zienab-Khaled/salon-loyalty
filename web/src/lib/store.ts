@@ -59,7 +59,7 @@ function generateMemberCode(existing: Set<string>) {
 }
 
 function normalizePhone(phone: string) {
-  return phone.replace(/\s+/g, "");
+  return phone.replace(/\D/g, "");
 }
 
 async function saveCustomerRedis(customer: Customer) {
@@ -103,9 +103,28 @@ export async function getCustomerByPhone(phone: string) {
   const normalized = normalizePhone(phone);
 
   if (hasRedis()) {
-    const code = await getRedis().get<string>(`${PREFIX}phone:${normalized}`);
-    if (!code) return null;
-    return getCustomerByCode(code);
+    const r = getRedis();
+    const raw = await r.get(`${PREFIX}phone:${normalized}`);
+    const code =
+      typeof raw === "string"
+        ? raw
+        : raw == null
+          ? null
+          : String(raw);
+
+    if (!code || code === "null" || code === "[object Object]") {
+      if (raw != null) {
+        await r.del(`${PREFIX}phone:${normalized}`);
+      }
+      return null;
+    }
+
+    const customer = await getCustomerByCode(code);
+    if (!customer) {
+      await r.del(`${PREFIX}phone:${normalized}`);
+      return null;
+    }
+    return customer;
   }
 
   if (isVercelRuntime()) return null;

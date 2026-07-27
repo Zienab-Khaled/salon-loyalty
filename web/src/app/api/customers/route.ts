@@ -27,7 +27,8 @@ export async function POST(request: Request) {
       existing: Boolean(existing),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("create customer failed:", message, error);
     if (message === "REDIS_REQUIRED") {
       return NextResponse.json(
         {
@@ -37,6 +38,9 @@ export async function POST(request: Request) {
         { status: 503 }
       );
     }
-    return NextResponse.json({ error: "تعذر التسجيل" }, { status: 500 });
+    return NextResponse.json(
+      { error: "تعذر التسجيل", detail: message },
+      { status: 500 }
+    );
   }
 }
