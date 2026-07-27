@@ -142,7 +142,23 @@ export async function createCustomer(input: {
   assertStorageAvailable();
 
   const existing = await getCustomerByPhone(input.phone);
-  if (existing) return existing;
+  if (existing) {
+    const nextName = input.name.trim();
+    if (nextName && existing.name !== nextName) {
+      existing.name = nextName;
+      if (hasRedis()) {
+        await saveCustomerRedis(existing);
+      } else {
+        const store = await readFileStore();
+        const row = store.customers.find((c) => c.id === existing.id);
+        if (row) {
+          row.name = nextName;
+          await writeFileStore(store);
+        }
+      }
+    }
+    return existing;
+  }
 
   if (hasRedis()) {
     const r = getRedis();
