@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <circle cx="100" cy="100" r="96" fill="#0a0a0a" stroke="#e8e8e8" stroke-width="4"/>
+  <path d="M70 118c8 22 52 22 60 0" stroke="#f2f2f2" stroke-width="5" stroke-linecap="round"/>
+  <path d="M78 92c0-28 14-48 22-48s22 20 22 48" stroke="#f2f2f2" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="88" cy="96" r="6" fill="#f2f2f2"/>
+  <circle cx="112" cy="96" r="6" fill="#f2f2f2"/>
+  <path d="M40 70l20 28M160 70l-20 28M55 55l35 20M145 55l-35 20" stroke="#c9a86c" stroke-width="4" stroke-linecap="round"/>
+  <path d="M55 155h90" stroke="#c9a86c" stroke-width="6" stroke-linecap="round"/>
+  <text x="100" y="172" text-anchor="middle" fill="#f5f5f5" font-family="Georgia, serif" font-size="18" font-style="italic">Gentlemen</text>
+</svg>
