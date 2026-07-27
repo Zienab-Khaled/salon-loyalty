@@ -26,7 +26,17 @@ export async function POST(request: Request) {
       settings,
       existing: Boolean(existing),
     });
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message === "REDIS_REQUIRED") {
+      return NextResponse.json(
+        {
+          error:
+            "الموقع على Vercel يحتاج ربط Upstash Redis أولاً من Storage ثم Redeploy",
+        },
+        { status: 503 }
+      );
+    }
     return NextResponse.json({ error: "تعذر التسجيل" }, { status: 500 });
   }
 }

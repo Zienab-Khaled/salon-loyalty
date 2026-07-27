@@ -1,4 +1,5 @@
 import { StaffPanel } from "@/components/StaffPanel";
+import { StorageBanner } from "@/components/StorageBanner";
 import Link from "next/link";
 
 export default function StaffPage() {
@@ -20,6 +21,9 @@ export default function StaffPage() {
         <span className="text-[11px] tracking-[0.2em] text-[var(--gold)]/80">
           STAFF
         </span>
+      </div>
+      <div className="mx-auto w-full max-w-lg">
+        <StorageBanner />
       </div>
       <StaffPanel />
     </main>

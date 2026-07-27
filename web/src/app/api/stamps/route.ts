@@ -26,7 +26,15 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "ERROR";
     const map: Record<string, { status: number; error: string }> = {
-      CUSTOMER_NOT_FOUND: { status: 404, error: "العميل غير موجود" },
+      CUSTOMER_NOT_FOUND: {
+        status: 404,
+        error:
+          "البطاقة غير موجودة — أنشئها من جديد بعد ربط Upstash Redis",
+      },
+      REDIS_REQUIRED: {
+        status: 503,
+        error: "اربطي Upstash Redis من Vercel Storage ثم Redeploy",
+      },
       FREE_PENDING: {
         status: 400,
         error: "العميل عنده تحليقة مجانية — استخدمها أولاً",

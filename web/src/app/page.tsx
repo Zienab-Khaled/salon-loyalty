@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { RegisterForm } from "@/components/RegisterForm";
+import { StorageBanner } from "@/components/StorageBanner";
 
 export default function HomePage() {
   return (
     <main className="home-shell relative flex flex-1 flex-col px-4 py-8 sm:py-12">
       <div className="mx-auto w-full max-w-3xl">
+        <StorageBanner />
         <header className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}

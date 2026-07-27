@@ -1,21 +1,11 @@
-import { Redis } from "@upstash/redis";
 import { promises as fs } from "fs";
 import path from "path";
 import { DEFAULT_SETTINGS } from "./config";
 import { createId } from "./id";
+import { getRedis, hasRedis, isVercelRuntime } from "./redis";
 import type { Customer, Settings, StoreData, Visit } from "./types";
 
 const PREFIX = "gentlemen:";
-
-function hasRedis() {
-  return Boolean(
-    process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-  );
-}
-
-function redis() {
-  return Redis.fromEnv();
-}
 
 const globalForStore = globalThis as unknown as {
   __loyaltyStore?: StoreData;
@@ -30,9 +20,6 @@ function emptyStore(): StoreData {
 }
 
 function dataFilePath() {
-  if (process.env.VERCEL) {
-    return path.join("/tmp", "gentlemen-loyalty.json");
-  }
   return path.join(process.cwd(), "data", "store.json");
 }
 
@@ -52,12 +39,14 @@ async function readFileStore(): Promise<StoreData> {
 
 async function writeFileStore(store: StoreData) {
   globalForStore.__loyaltyStore = store;
-  try {
-    const file = dataFilePath();
-    await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, JSON.stringify(store, null, 2), "utf8");
-  } catch {
-    // ignore on restricted filesystems
+  const file = dataFilePath();
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(store, null, 2), "utf8");
+}
+
+function assertStorageAvailable() {
+  if (isVercelRuntime() && !hasRedis()) {
+    throw new Error("REDIS_REQUIRED");
   }
 }
 
@@ -73,12 +62,22 @@ function normalizePhone(phone: string) {
   return phone.replace(/\s+/g, "");
 }
 
+async function saveCustomerRedis(customer: Customer) {
+  const r = getRedis();
+  await r.set(`${PREFIX}customer:${customer.memberCode}`, customer);
+  await r.set(
+    `${PREFIX}phone:${normalizePhone(customer.phone)}`,
+    customer.memberCode
+  );
+  await r.sadd(`${PREFIX}customer-codes`, customer.memberCode);
+}
+
 export async function getSettings(): Promise<Settings> {
   if (hasRedis()) {
-    const r = redis();
-    const settings = await r.get<Settings>(`${PREFIX}settings`);
+    const settings = await getRedis().get<Settings>(`${PREFIX}settings`);
     return settings ?? { ...DEFAULT_SETTINGS };
   }
+  if (isVercelRuntime()) return { ...DEFAULT_SETTINGS };
   const store = await readFileStore();
   return store.settings;
 }
@@ -88,9 +87,13 @@ export async function getCustomerByCode(code: string) {
   if (!memberCode) return null;
 
   if (hasRedis()) {
-    const r = redis();
-    return (await r.get<Customer>(`${PREFIX}customer:${memberCode}`)) ?? null;
+    return (
+      (await getRedis().get<Customer>(`${PREFIX}customer:${memberCode}`)) ??
+      null
+    );
   }
+
+  if (isVercelRuntime()) return null;
 
   const store = await readFileStore();
   return store.customers.find((c) => c.memberCode === memberCode) ?? null;
@@ -100,11 +103,12 @@ export async function getCustomerByPhone(phone: string) {
   const normalized = normalizePhone(phone);
 
   if (hasRedis()) {
-    const r = redis();
-    const code = await r.get<string>(`${PREFIX}phone:${normalized}`);
+    const code = await getRedis().get<string>(`${PREFIX}phone:${normalized}`);
     if (!code) return null;
     return getCustomerByCode(code);
   }
+
+  if (isVercelRuntime()) return null;
 
   const store = await readFileStore();
   return (
@@ -112,22 +116,17 @@ export async function getCustomerByPhone(phone: string) {
   );
 }
 
-async function saveCustomerRedis(customer: Customer) {
-  const r = redis();
-  await r.set(`${PREFIX}customer:${customer.memberCode}`, customer);
-  await r.set(`${PREFIX}phone:${normalizePhone(customer.phone)}`, customer.memberCode);
-  await r.sadd(`${PREFIX}customer-codes`, customer.memberCode);
-}
-
 export async function createCustomer(input: {
   name: string;
   phone: string;
 }): Promise<Customer> {
+  assertStorageAvailable();
+
   const existing = await getCustomerByPhone(input.phone);
   if (existing) return existing;
 
   if (hasRedis()) {
-    const r = redis();
+    const r = getRedis();
     const codes = (await r.smembers(`${PREFIX}customer-codes`)) as string[];
     const customer: Customer = {
       id: createId(),
@@ -182,6 +181,8 @@ export async function addStamp(memberCode: string): Promise<{
   visit: Visit;
   message: string;
 }> {
+  assertStorageAvailable();
+
   const customer = await getCustomerByCode(memberCode);
   if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
   if (customer.freeAvailable) throw new Error("FREE_PENDING");
@@ -190,7 +191,7 @@ export async function addStamp(memberCode: string): Promise<{
   const required = settings.stampsRequired;
 
   if (hasRedis()) {
-    const r = redis();
+    const r = getRedis();
     const lastAt = await r.get<string>(`${PREFIX}last-stamp:${customer.id}`);
     if (lastAt && Date.now() - new Date(lastAt).getTime() < 60_000) {
       throw new Error("TOO_SOON");
@@ -234,7 +235,10 @@ export async function addStamp(memberCode: string): Promise<{
   const lastStamp = store.visits
     .filter((v) => v.customerId === row.id && v.type === "stamp")
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-  if (lastStamp && Date.now() - new Date(lastStamp.createdAt).getTime() < 60_000) {
+  if (
+    lastStamp &&
+    Date.now() - new Date(lastStamp.createdAt).getTime() < 60_000
+  ) {
     throw new Error("TOO_SOON");
   }
 
@@ -263,6 +267,8 @@ export async function redeemFree(memberCode: string): Promise<{
   visit: Visit;
   message: string;
 }> {
+  assertStorageAvailable();
+
   const customer = await getCustomerByCode(memberCode);
   if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
   if (!customer.freeAvailable) throw new Error("NO_FREE");
@@ -284,7 +290,7 @@ export async function redeemFree(memberCode: string): Promise<{
   };
 
   if (hasRedis()) {
-    const r = redis();
+    const r = getRedis();
     await saveCustomerRedis(customer);
     await r.lpush(`${PREFIX}visits`, JSON.stringify(visit));
     await r.ltrim(`${PREFIX}visits`, 0, 99);
@@ -302,14 +308,15 @@ export async function redeemFree(memberCode: string): Promise<{
 
 export async function recentVisits(limit = 20) {
   if (hasRedis()) {
-    const r = redis();
-    const raw = await r.lrange(`${PREFIX}visits`, 0, limit - 1);
+    const raw = await getRedis().lrange(`${PREFIX}visits`, 0, limit - 1);
     return raw.map((item) => {
       const visit =
-        typeof item === "string" ? (JSON.parse(item) as Visit & {
-          customerName?: string;
-          memberCode?: string;
-        }) : (item as Visit & { customerName?: string; memberCode?: string });
+        typeof item === "string"
+          ? (JSON.parse(item) as Visit & {
+              customerName?: string;
+              memberCode?: string;
+            })
+          : (item as Visit & { customerName?: string; memberCode?: string });
       return {
         ...visit,
         customerName: visit.customerName ?? "—",
@@ -317,6 +324,8 @@ export async function recentVisits(limit = 20) {
       };
     });
   }
+
+  if (isVercelRuntime()) return [];
 
   const store = await readFileStore();
   return store.visits.slice(0, limit).map((visit) => {
@@ -329,6 +338,4 @@ export async function recentVisits(limit = 20) {
   });
 }
 
-export function isPersistentStoreEnabled() {
-  return hasRedis();
-}
+export { hasRedis, isVercelRuntime };
