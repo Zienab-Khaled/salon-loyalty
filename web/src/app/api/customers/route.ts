@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createCustomer, getCustomerByPhone } from "@/lib/store";
+import { createCustomer, getCustomerByPhone, getSettings } from "@/lib/store";
 
 export async function POST(request: Request) {
   try {
@@ -19,9 +19,11 @@ export async function POST(request: Request) {
 
     const existing = await getCustomerByPhone(phone);
     const customer = existing ?? (await createCustomer({ name, phone }));
+    const settings = await getSettings();
 
     return NextResponse.json({
       customer,
+      settings,
       existing: Boolean(existing),
     });
   } catch {

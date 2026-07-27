@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { saveCardCache } from "@/lib/card-cache";
 
 export function RegisterForm() {
   const router = useRouter();
@@ -25,6 +26,10 @@ export function RegisterForm() {
         setError(data.error || "تعذر التسجيل");
         return;
       }
+      saveCardCache(data.customer.memberCode, {
+        customer: data.customer,
+        settings: data.settings,
+      });
       router.push(`/card/${data.customer.memberCode}`);
     } catch {
       setError("حصل خطأ في الاتصال");
@@ -58,10 +63,11 @@ export function RegisterForm() {
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
           placeholder="05xxxxxxxx"
-          className="field"
+          className="field ltr-input"
           required
           inputMode="tel"
           autoComplete="tel"
+          dir="ltr"
         />
       </div>
       {error ? <p className="text-sm text-red-300">{error}</p> : null}

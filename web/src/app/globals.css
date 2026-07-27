@@ -129,3 +129,10 @@ body {
     linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
 }
+
+.field.ltr-input,
+.ltr-input {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: plaintext;
+}

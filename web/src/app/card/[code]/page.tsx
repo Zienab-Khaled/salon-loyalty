@@ -1,7 +1,5 @@
-import { notFound } from "next/navigation";
 import Link from "next/link";
-import { CardClient } from "@/components/CardClient";
-import { getCustomerByCode, getSettings } from "@/lib/store";
+import { CardPageClient } from "@/components/CardPageClient";
 
 type Props = {
   params: Promise<{ code: string }>;
@@ -9,13 +7,8 @@ type Props = {
 
 export default async function CardPage({ params }: Props) {
   const { code } = await params;
-  const customer = await getCustomerByCode(code);
-  if (!customer) notFound();
-  const settings = await getSettings();
-
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-  const base = siteUrl.replace(/\/$/, "");
-  const cardUrl = `${base}/staff?code=${customer.memberCode}`;
+  const siteUrl =
+    process.env.NEXT_PUBLIC_SITE_URL || "https://salon-loyalty-upuq.vercel.app";
 
   return (
     <main className="card-stage flex min-h-full flex-1 flex-col">
@@ -35,12 +28,7 @@ export default async function CardPage({ params }: Props) {
       </div>
 
       <div className="flex flex-1 items-start justify-center px-4 pb-10 pt-2 sm:items-center sm:pb-14">
-        <CardClient
-          code={customer.memberCode}
-          initialCustomer={customer}
-          initialSettings={settings}
-          cardUrl={cardUrl}
-        />
+        <CardPageClient code={code} siteUrl={siteUrl} />
       </div>
     </main>
   );

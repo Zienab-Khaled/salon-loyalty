@@ -1,8 +1,21 @@
+import { Redis } from "@upstash/redis";
 import { promises as fs } from "fs";
 import path from "path";
 import { DEFAULT_SETTINGS } from "./config";
 import { createId } from "./id";
-import type { Customer, StoreData, Visit } from "./types";
+import type { Customer, Settings, StoreData, Visit } from "./types";
+
+const PREFIX = "gentlemen:";
+
+function hasRedis() {
+  return Boolean(
+    process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+  );
+}
+
+function redis() {
+  return Redis.fromEnv();
+}
 
 const globalForStore = globalThis as unknown as {
   __loyaltyStore?: StoreData;
@@ -23,38 +36,29 @@ function dataFilePath() {
   return path.join(process.cwd(), "data", "store.json");
 }
 
-async function readFromDisk(): Promise<StoreData | null> {
+async function readFileStore(): Promise<StoreData> {
+  if (globalForStore.__loyaltyStore) return globalForStore.__loyaltyStore;
   try {
     const raw = await fs.readFile(dataFilePath(), "utf8");
-    return JSON.parse(raw) as StoreData;
+    const parsed = JSON.parse(raw) as StoreData;
+    globalForStore.__loyaltyStore = parsed;
+    return parsed;
   } catch {
-    return null;
+    const store = emptyStore();
+    globalForStore.__loyaltyStore = store;
+    return store;
   }
 }
 
-async function writeToDisk(data: StoreData) {
+async function writeFileStore(store: StoreData) {
+  globalForStore.__loyaltyStore = store;
   try {
     const file = dataFilePath();
     await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, JSON.stringify(data, null, 2), "utf8");
+    await fs.writeFile(file, JSON.stringify(store, null, 2), "utf8");
   } catch {
-    // Vercel cold paths / permissions — memory still holds data for the instance
+    // ignore on restricted filesystems
   }
-}
-
-async function getStore(): Promise<StoreData> {
-  if (globalForStore.__loyaltyStore) {
-    return globalForStore.__loyaltyStore;
-  }
-  const fromDisk = await readFromDisk();
-  const store = fromDisk ?? emptyStore();
-  globalForStore.__loyaltyStore = store;
-  return store;
-}
-
-async function saveStore(store: StoreData) {
-  globalForStore.__loyaltyStore = store;
-  await writeToDisk(store);
 }
 
 function generateMemberCode(existing: Set<string>) {
@@ -65,42 +69,82 @@ function generateMemberCode(existing: Set<string>) {
   return createId(6).toUpperCase();
 }
 
-export async function getSettings() {
-  const store = await getStore();
+function normalizePhone(phone: string) {
+  return phone.replace(/\s+/g, "");
+}
+
+export async function getSettings(): Promise<Settings> {
+  if (hasRedis()) {
+    const r = redis();
+    const settings = await r.get<Settings>(`${PREFIX}settings`);
+    return settings ?? { ...DEFAULT_SETTINGS };
+  }
+  const store = await readFileStore();
   return store.settings;
 }
 
-export async function listCustomers() {
-  const store = await getStore();
-  return store.customers;
-}
-
 export async function getCustomerByCode(code: string) {
-  const store = await getStore();
-  return (
-    store.customers.find((c) => c.memberCode === code.trim()) ?? null
-  );
+  const memberCode = code.trim();
+  if (!memberCode) return null;
+
+  if (hasRedis()) {
+    const r = redis();
+    return (await r.get<Customer>(`${PREFIX}customer:${memberCode}`)) ?? null;
+  }
+
+  const store = await readFileStore();
+  return store.customers.find((c) => c.memberCode === memberCode) ?? null;
 }
 
 export async function getCustomerByPhone(phone: string) {
-  const store = await getStore();
-  const normalized = phone.replace(/\s+/g, "");
+  const normalized = normalizePhone(phone);
+
+  if (hasRedis()) {
+    const r = redis();
+    const code = await r.get<string>(`${PREFIX}phone:${normalized}`);
+    if (!code) return null;
+    return getCustomerByCode(code);
+  }
+
+  const store = await readFileStore();
   return (
-    store.customers.find((c) => c.phone.replace(/\s+/g, "") === normalized) ??
-    null
+    store.customers.find((c) => normalizePhone(c.phone) === normalized) ?? null
   );
+}
+
+async function saveCustomerRedis(customer: Customer) {
+  const r = redis();
+  await r.set(`${PREFIX}customer:${customer.memberCode}`, customer);
+  await r.set(`${PREFIX}phone:${normalizePhone(customer.phone)}`, customer.memberCode);
+  await r.sadd(`${PREFIX}customer-codes`, customer.memberCode);
 }
 
 export async function createCustomer(input: {
   name: string;
   phone: string;
 }): Promise<Customer> {
-  const store = await getStore();
-  const existingPhone = store.customers.find(
-    (c) => c.phone.replace(/\s+/g, "") === input.phone.replace(/\s+/g, "")
-  );
-  if (existingPhone) return existingPhone;
+  const existing = await getCustomerByPhone(input.phone);
+  if (existing) return existing;
 
+  if (hasRedis()) {
+    const r = redis();
+    const codes = (await r.smembers(`${PREFIX}customer-codes`)) as string[];
+    const customer: Customer = {
+      id: createId(),
+      memberCode: generateMemberCode(new Set(codes)),
+      name: input.name.trim(),
+      phone: input.phone.trim(),
+      stamps: 0,
+      freeAvailable: false,
+      createdAt: new Date().toISOString(),
+      lastNotification: null,
+      notificationAt: null,
+    };
+    await saveCustomerRedis(customer);
+    return customer;
+  }
+
+  const store = await readFileStore();
   const codes = new Set(store.customers.map((c) => c.memberCode));
   const customer: Customer = {
     id: createId(),
@@ -114,7 +158,7 @@ export async function createCustomer(input: {
     notificationAt: null,
   };
   store.customers.push(customer);
-  await saveStore(store);
+  await writeFileStore(store);
   return customer;
 }
 
@@ -138,48 +182,80 @@ export async function addStamp(memberCode: string): Promise<{
   visit: Visit;
   message: string;
 }> {
-  const store = await getStore();
-  const customer = store.customers.find((c) => c.memberCode === memberCode);
+  const customer = await getCustomerByCode(memberCode);
   if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
-  if (customer.freeAvailable) {
-    throw new Error("FREE_PENDING");
+  if (customer.freeAvailable) throw new Error("FREE_PENDING");
+
+  const settings = await getSettings();
+  const required = settings.stampsRequired;
+
+  if (hasRedis()) {
+    const r = redis();
+    const lastAt = await r.get<string>(`${PREFIX}last-stamp:${customer.id}`);
+    if (lastAt && Date.now() - new Date(lastAt).getTime() < 60_000) {
+      throw new Error("TOO_SOON");
+    }
+
+    customer.stamps += 1;
+    if (customer.stamps >= required) {
+      customer.stamps = required;
+      customer.freeAvailable = true;
+    }
+    const message = buildStampMessage(
+      customer.stamps,
+      required,
+      customer.freeAvailable
+    );
+    customer.lastNotification = message;
+    customer.notificationAt = new Date().toISOString();
+
+    const visit = {
+      id: createId(),
+      customerId: customer.id,
+      type: "stamp" as const,
+      createdAt: new Date().toISOString(),
+      message,
+      customerName: customer.name,
+      memberCode: customer.memberCode,
+    };
+
+    await saveCustomerRedis(customer);
+    await r.set(`${PREFIX}last-stamp:${customer.id}`, visit.createdAt);
+    await r.lpush(`${PREFIX}visits`, JSON.stringify(visit));
+    await r.ltrim(`${PREFIX}visits`, 0, 99);
+    return { customer, visit, message };
   }
+
+  const store = await readFileStore();
+  const row = store.customers.find((c) => c.memberCode === memberCode);
+  if (!row) throw new Error("CUSTOMER_NOT_FOUND");
+  if (row.freeAvailable) throw new Error("FREE_PENDING");
 
   const lastStamp = store.visits
-    .filter((v) => v.customerId === customer.id && v.type === "stamp")
+    .filter((v) => v.customerId === row.id && v.type === "stamp")
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-
-  if (lastStamp) {
-    const diff = Date.now() - new Date(lastStamp.createdAt).getTime();
-    if (diff < 60_000) throw new Error("TOO_SOON");
+  if (lastStamp && Date.now() - new Date(lastStamp.createdAt).getTime() < 60_000) {
+    throw new Error("TOO_SOON");
   }
 
-  const required = store.settings.stampsRequired;
-  customer.stamps += 1;
-
-  if (customer.stamps >= required) {
-    customer.stamps = required;
-    customer.freeAvailable = true;
+  row.stamps += 1;
+  if (row.stamps >= required) {
+    row.stamps = required;
+    row.freeAvailable = true;
   }
-
-  const message = buildStampMessage(
-    customer.stamps,
-    required,
-    customer.freeAvailable
-  );
-  customer.lastNotification = message;
-  customer.notificationAt = new Date().toISOString();
-
+  const message = buildStampMessage(row.stamps, required, row.freeAvailable);
+  row.lastNotification = message;
+  row.notificationAt = new Date().toISOString();
   const visit: Visit = {
     id: createId(),
-    customerId: customer.id,
+    customerId: row.id,
     type: "stamp",
     createdAt: new Date().toISOString(),
     message,
   };
   store.visits.unshift(visit);
-  await saveStore(store);
-  return { customer, visit, message };
+  await writeFileStore(store);
+  return { customer: row, visit, message };
 }
 
 export async function redeemFree(memberCode: string): Promise<{
@@ -187,8 +263,7 @@ export async function redeemFree(memberCode: string): Promise<{
   visit: Visit;
   message: string;
 }> {
-  const store = await getStore();
-  const customer = store.customers.find((c) => c.memberCode === memberCode);
+  const customer = await getCustomerByCode(memberCode);
   if (!customer) throw new Error("CUSTOMER_NOT_FOUND");
   if (!customer.freeAvailable) throw new Error("NO_FREE");
 
@@ -198,20 +273,52 @@ export async function redeemFree(memberCode: string): Promise<{
   customer.lastNotification = message;
   customer.notificationAt = new Date().toISOString();
 
-  const visit: Visit = {
+  const visit = {
     id: createId(),
     customerId: customer.id,
-    type: "redeem",
+    type: "redeem" as const,
     createdAt: new Date().toISOString(),
     message,
+    customerName: customer.name,
+    memberCode: customer.memberCode,
   };
+
+  if (hasRedis()) {
+    const r = redis();
+    await saveCustomerRedis(customer);
+    await r.lpush(`${PREFIX}visits`, JSON.stringify(visit));
+    await r.ltrim(`${PREFIX}visits`, 0, 99);
+    return { customer, visit, message };
+  }
+
+  const store = await readFileStore();
+  const row = store.customers.find((c) => c.memberCode === memberCode);
+  if (!row) throw new Error("CUSTOMER_NOT_FOUND");
+  Object.assign(row, customer);
   store.visits.unshift(visit);
-  await saveStore(store);
-  return { customer, visit, message };
+  await writeFileStore(store);
+  return { customer: row, visit, message };
 }
 
 export async function recentVisits(limit = 20) {
-  const store = await getStore();
+  if (hasRedis()) {
+    const r = redis();
+    const raw = await r.lrange(`${PREFIX}visits`, 0, limit - 1);
+    return raw.map((item) => {
+      const visit =
+        typeof item === "string" ? (JSON.parse(item) as Visit & {
+          customerName?: string;
+          memberCode?: string;
+        }) : (item as Visit & { customerName?: string; memberCode?: string });
+      return {
+        ...visit,
+        customerName: visit.customerName ?? "—",
+        memberCode: visit.memberCode ?? "—",
+      };
+    });
+  }
+
+  const store = await readFileStore();
   return store.visits.slice(0, limit).map((visit) => {
     const customer = store.customers.find((c) => c.id === visit.customerId);
     return {
@@ -220,4 +327,8 @@ export async function recentVisits(limit = 20) {
       memberCode: customer?.memberCode ?? "—",
     };
   });
+}
+
+export function isPersistentStoreEnabled() {
+  return hasRedis();
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Customer, Settings } from "@/lib/types";
+import { saveCardCache } from "@/lib/card-cache";
 import { LoyaltyCard } from "./LoyaltyCard";
 
 type Props = {
@@ -63,6 +64,10 @@ export function CardClient({
         setCustomer(data.customer);
         setSettings(data.settings);
         maybeNotify(data.customer);
+        saveCardCache(code, {
+          customer: data.customer,
+          settings: data.settings,
+        });
       } catch {
         // ignore polling errors
       }
