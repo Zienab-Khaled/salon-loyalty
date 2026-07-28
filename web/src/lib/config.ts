@@ -1,7 +1,7 @@
 import type { Settings } from "./types";
 
 export const DEFAULT_SETTINGS: Settings = {
-  stampsRequired: 4,
+  stampsRequired: 2,
   salonName: "Gentlemen",
   offerTitle: "ولاؤك يستحق",
 };

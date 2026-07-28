@@ -73,13 +73,8 @@ async function saveCustomerRedis(customer: Customer) {
 }
 
 export async function getSettings(): Promise<Settings> {
-  if (hasRedis()) {
-    const settings = await getRedis().get<Settings>(`${PREFIX}settings`);
-    return settings ?? { ...DEFAULT_SETTINGS };
-  }
-  if (isVercelRuntime()) return { ...DEFAULT_SETTINGS };
-  const store = await readFileStore();
-  return store.settings;
+  // Always use current app defaults so offer changes (e.g. 2+1) apply immediately.
+  return { ...DEFAULT_SETTINGS };
 }
 
 export async function getCustomerByCode(code: string) {

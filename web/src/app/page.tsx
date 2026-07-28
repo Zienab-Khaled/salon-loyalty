@@ -44,7 +44,7 @@ export default function HomePage() {
             ولاؤك يستحق
           </h1>
           <p className="mx-auto mt-4 max-w-lg text-base leading-relaxed text-white/60 sm:text-lg">
-            أربع تحليقات والخامسة{" "}
+            تحليقتين والثالثة{" "}
             <span className="text-[var(--gold)]">مجاناً</span>. سجّل بياناتك
             واحصل على بطاقتك الرقمية خلال ثوانٍ.
           </p>
@@ -54,7 +54,7 @@ export default function HomePage() {
         <section className="mx-auto mt-16 grid max-w-2xl gap-3 text-sm sm:grid-cols-3">
           <Step n="01" title="سجّل" text="بالاسم والجوال" />
           <Step n="02" title="أظهر الـ QR" text="عند كل زيارة" />
-          <Step n="03" title="اجمع" text="والخامسة مجاناً" />
+          <Step n="03" title="اجمع" text="والثالثة مجاناً" />
         </section>
       </div>
     </main>

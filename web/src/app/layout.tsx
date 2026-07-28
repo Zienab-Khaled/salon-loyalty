@@ -10,7 +10,7 @@ const cairo = Cairo({
 
 export const metadata: Metadata = {
   title: "Gentlemen | بطاقة الولاء",
-  description: "بطاقة ولاء صالون حلاقة Gentlemen — أربع تحليقات والخامسة مجاناً",
+  description: "بطاقة ولاء صالون حلاقة Gentlemen — تحليقتين والثالثة مجاناً",
 };
 
 export default function RootLayout({
